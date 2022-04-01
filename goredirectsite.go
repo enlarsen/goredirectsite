@@ -1,8 +1,11 @@
 package main
 
+// example index.html file:
+
+// <meta http-equiv="refresh" content="0; URL='/devtools-html/4.0.0/en/extensions-devtools'" />
+
 import (
 	"flag"
-	"fmt"
 	"io/fs"
 	"io/ioutil"
 	"log"
@@ -16,15 +19,26 @@ import (
 	"github.com/yuin/goldmark/text"
 )
 
+// type fileMetadata struct {
+// 	filepath  string
+// 	id        string
+// 	permalink string
+// }
+
 type fileMetadata struct {
-	filepath  string
-	id        string
-	permalink string
+	filepath string
+	id       string
+}
+
+type fileRedirs struct {
+	sourceFile string
+	redirects  []string
 }
 
 var baseUrl string
-var oldFileMetadata []fileMetadata
-var newFileMetadata []fileMetadata
+var oldFileMetadata map[string]fileMetadata
+var newFileMetadata map[string]fileMetadata
+var existingRedirs []fileRedirs
 
 func main() {
 
@@ -32,16 +46,14 @@ func main() {
 	//
 	flag.Parse()
 
-	baseUrl = flag.Arg(0)
-
-	// TODO: try to parse baseUrl (want to modify this URL to point to each new page)
+	baseUrl = flag.Arg(0) // eg: https://docs.deque.com/devtools-html/4.0.0/en
 
 	oldFilesDir := flag.Arg(1)
 	newFilesDir := flag.Arg(2)
 	createDir := flag.Arg(3)
 
-	if oldFilesDir == "" || newFilesDir == "" || createDir == "" {
-		log.Fatal("must specify three directories: <oldFilesDir> <newFilesDir> <createDir>")
+	if baseUrl == "" || oldFilesDir == "" || newFilesDir == "" || createDir == "" {
+		log.Fatal("must specify four parameters: one url and three directories: <base-url> <oldFilesDir> <newFilesDir> <createDir>")
 	}
 
 	err := checkDir(oldFilesDir)
@@ -60,24 +72,32 @@ func main() {
 		log.Fatal(err)
 	}
 
-	oldFileMetadata = make([]fileMetadata, 0)
-	newFileMetadata = make([]fileMetadata, 0)
+	oldFileMetadata = make(map[string]fileMetadata, 0)
+	newFileMetadata = make(map[string]fileMetadata, 0)
+
+	existingRedirs = make([]fileRedirs, 0)
 
 	// Walk old files
-
+	log.Println("Walking old site's files")
 	err = walkFiles(oldFilesDir, oldFileMetadata)
 
 	if err != nil {
-		fmt.Printf("error walking the path: %v\n", err)
+		log.Printf("error walking the path: %v\n", err)
 		return
 	}
 
+	log.Println("Walking new site's files")
 	err = walkFiles(newFilesDir, newFileMetadata)
 
 	if err != nil {
-		fmt.Printf("error walking the path: %v\n", err)
+		log.Printf("error walking the path: %v\n", err)
 		return
 	}
+
+	log.Println("Checking old (source) against new (destination)")
+	match(oldFileMetadata, newFileMetadata)
+	log.Println("Checking new (source) against old (destination)")
+	match(newFileMetadata, oldFileMetadata)
 
 }
 
@@ -94,7 +114,7 @@ func checkDir(directory string) (err error) {
 	return nil
 }
 
-func walkFiles(filesDir string, metadata []fileMetadata) (err error) {
+func walkFiles(filesDir string, metadata map[string]fileMetadata) (err error) {
 
 	err = filepath.Walk(filesDir, func(path string, info fs.FileInfo, err error) error {
 		if err != nil {
@@ -112,7 +132,7 @@ func walkFiles(filesDir string, metadata []fileMetadata) (err error) {
 	return err
 }
 
-func parseFile(contentPath string, baseDir string, filemeta []fileMetadata) {
+func parseFile(contentPath string, baseDir string, filemeta map[string]fileMetadata) {
 
 	if path.Ext(contentPath) != ".md" {
 		return
@@ -140,13 +160,56 @@ func parseFile(contentPath string, baseDir string, filemeta []fileMetadata) {
 
 	permalink, ok := metaData["permalink"].(string)
 	if !ok {
-		log.Fatalf("Permalink not found on file %s\n", contentPath)
+		log.Println("Couldn't find permalink metadata on: " + contentPath)
+		return
 	}
 
-	filemeta = append(filemeta, fileMetadata{
-		permalink: permalink,
-		filepath:  contentPath,
-		id:        id,
-	})
+	_, ok = filemeta[permalink]
 
+	if ok {
+		log.Printf("Permalink value already defined: %s for file: %s, other file: %s\n",
+			permalink, contentPath, filemeta[permalink].filepath)
+		return
+	}
+
+	redirect, ok := metaData["redirect_from"]
+
+	if ok {
+		arr, ok := redirect.([]interface{})
+
+		if ok {
+			newRedir := fileRedirs{
+				sourceFile: contentPath,
+				redirects:  make([]string, 0),
+			}
+			for _, value := range arr {
+				newRedir.redirects = append(newRedir.redirects, value.(string))
+			}
+
+			existingRedirs = append(existingRedirs, newRedir)
+
+		}
+	}
+
+	filemeta[permalink] = fileMetadata{
+		filepath: contentPath,
+		id:       id,
+	}
+
+	// *filemeta = append(*filemeta, fileMetadata{
+	// 	permalink: permalink,
+	// 	filepath:  contentPath,
+	// 	id:        id,
+	// })
+
+}
+
+func match(source map[string]fileMetadata, dest map[string]fileMetadata) {
+
+	for k, _ := range source {
+		_, ok := dest[k]
+		if !ok {
+			log.Printf("Couldn't find %s in destination pages", k)
+		}
+	}
 }
