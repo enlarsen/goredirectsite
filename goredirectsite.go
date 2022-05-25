@@ -29,22 +29,18 @@ import (
 // }
 
 type fileMetadata struct {
-	filepath string
-	id       string
-}
-
-type fileRedirs struct {
-	sourceFile string
-	redirects  []string
+	filepath  string
+	id        string
+	redirects []string
 }
 
 var baseUrl string
 var oldFilesDir string
 var newFilesDir string
+var createDir string
 
 var oldFileMetadata map[string]fileMetadata
 var newFileMetadata map[string]fileMetadata
-var existingRedirs []fileRedirs
 
 var fileTemplate = `<meta http-equiv="refresh" content="0; URL='%s'" />`
 
@@ -58,7 +54,7 @@ func main() {
 
 	oldFilesDir = flag.Arg(1)
 	newFilesDir = flag.Arg(2)
-	createDir := flag.Arg(3) // The output directory for the redirect site
+	createDir = flag.Arg(3) // The output directory for the redirect site
 
 	if baseUrl == "" || oldFilesDir == "" || newFilesDir == "" || createDir == "" {
 		log.Fatal("must specify four parameters: one url and three directories: <base-url> <oldFilesDir> <newFilesDir> <createDir>")
@@ -83,11 +79,9 @@ func main() {
 	oldFileMetadata = make(map[string]fileMetadata, 0)
 	newFileMetadata = make(map[string]fileMetadata, 0)
 
-	existingRedirs = make([]fileRedirs, 0)
-
 	// Walk old files
 	log.Println("Walking old site's files")
-	err = walkFiles(oldFilesDir, oldFileMetadata, true)
+	err = walkFiles(oldFilesDir, oldFileMetadata)
 
 	if err != nil {
 		log.Printf("error walking the path: %v\n", err)
@@ -95,7 +89,7 @@ func main() {
 	}
 
 	log.Println("Walking new site's files")
-	err = walkFiles(newFilesDir, newFileMetadata, false) // Don't save the new site's metadata redirects
+	err = walkFiles(newFilesDir, newFileMetadata)
 
 	if err != nil {
 		log.Printf("error walking the path: %v\n", err)
@@ -115,42 +109,22 @@ func main() {
 		dest, ok := newFileMetadata[k]
 		if ok {
 
-			newSrc := fixSrc(src.filepath)
-			newDest := dest.id
-			log.Printf("Found src: %s with dest: %s using key: %s\n",
-				strings.TrimPrefix(src.filepath, oldFilesDir), strings.TrimPrefix(dest.filepath, newFilesDir),
-				k)
+			makeRedirect(src.filepath, dest.id)
 
-			// Create a directory at the output directory plus existing dir to hold the redirect file.
-			os.MkdirAll(filepath.Join(createDir, filepath.Dir(newSrc)), 0755)
+			// Now create manual redirects based on the redirect_from metadata
 
-			destinationUrl, err := url.Parse(baseUrl)
-			if err != nil {
-				log.Fatal("Could not parse baseUrl")
+			for _, redir := range src.redirects {
+				log.Printf("Src file: %s, redir: %s\n", fixSrc(src.filepath), redir)
+				makeRedirect(redir, dest.id)
+
 			}
-			destinationUrl.Path = path.Join(destinationUrl.Path, newDest)
-
-			contents := fmt.Sprintf(fileTemplate, destinationUrl.String())
-
-			file, err := os.Create(path.Join(createDir, newSrc))
-			if err != nil {
-				log.Fatalf("Could not create %s", newSrc)
-			}
-			file.WriteString(contents)
-			file.Close()
 
 		}
 	}
 
-	// Now create manual redirects based on the redirect_from metadata
+	// Create an index page redirect, destination ID should be a command-line option instead
 
-	for _, redir := range existingRedirs {
-		for _, redirFile := range redir.redirects {
-			log.Printf("Src file: %s, redir: %s\n", redir.sourceFile, redirFile)
-		}
-	}
-
-	// Create an index page redirect
+	makeRedirect("index.html", "welcome-axe-devtools")
 }
 
 func checkDir(directory string) (err error) {
@@ -160,13 +134,13 @@ func checkDir(directory string) (err error) {
 	}
 
 	if !fileInfo.IsDir() {
-		return err
+		return fmt.Errorf("%s is not a directory", directory)
 	}
 
 	return nil
 }
 
-func walkFiles(filesDir string, metadata map[string]fileMetadata, saveRedirects bool) (err error) {
+func walkFiles(filesDir string, metadata map[string]fileMetadata) (err error) {
 
 	err = filepath.Walk(filesDir, func(path string, info fs.FileInfo, err error) error {
 		if err != nil {
@@ -175,16 +149,15 @@ func walkFiles(filesDir string, metadata map[string]fileMetadata, saveRedirects 
 		}
 
 		if !info.IsDir() {
-			parseFile(path, filesDir, metadata, saveRedirects)
+			parseFile(path, filesDir, metadata)
 		}
 
 		return nil
 	})
-
-	return err
+	return
 }
 
-func parseFile(contentPath string, baseDir string, filemeta map[string]fileMetadata, saveRedirects bool) {
+func parseFile(contentPath string, baseDir string, filemeta map[string]fileMetadata) {
 
 	if path.Ext(contentPath) != ".md" {
 		return
@@ -224,30 +197,24 @@ func parseFile(contentPath string, baseDir string, filemeta map[string]fileMetad
 		return
 	}
 
-	if saveRedirects {
-		redirect, ok := metaData["redirect_from"]
+	redirects := make([]string, 0)
+	redirect, ok := metaData["redirect_from"]
+
+	if ok {
+		arr, ok := redirect.([]interface{})
 
 		if ok {
-			arr, ok := redirect.([]interface{})
 
-			if ok {
-				newRedir := fileRedirs{
-					sourceFile: contentPath,
-					redirects:  make([]string, 0),
-				}
-				for _, value := range arr {
-					newRedir.redirects = append(newRedir.redirects, value.(string))
-				}
-
-				existingRedirs = append(existingRedirs, newRedir)
-
+			for _, value := range arr {
+				redirects = append(redirects, value.(string))
 			}
 		}
 	}
 
 	filemeta[permalink] = fileMetadata{
-		filepath: contentPath,
-		id:       id,
+		filepath:  contentPath,
+		id:        id,
+		redirects: redirects,
 	}
 
 }
@@ -274,4 +241,42 @@ func fixSrc(src string) string {
 
 	//	log.Printf("fixSrc: Changed %s to %s", src, newSrc)
 	return newSrc
+}
+
+func makeRedirect(srcFilepath string, destId string) {
+
+	var newSrc string
+
+	if filepath.IsAbs(srcFilepath) {
+		newSrc = fixSrc(srcFilepath)
+	} else {
+		newSrc = srcFilepath
+		if !strings.HasSuffix(newSrc, "index.html") {
+			newSrc = filepath.Join(newSrc, "index.html")
+		}
+		log.Printf("**** Got relative path for makeRedirect: %s changed to: %s", srcFilepath, newSrc)
+	}
+
+	newDest := destId
+	log.Printf("Found src: %s with destId: %s\n",
+		strings.TrimPrefix(srcFilepath, oldFilesDir), destId)
+
+	// Create a directory at the output directory plus existing dir to hold the redirect file.
+	os.MkdirAll(filepath.Join(createDir, filepath.Dir(newSrc)), 0755)
+
+	destinationUrl, err := url.Parse(baseUrl)
+	if err != nil {
+		log.Fatal("Could not parse baseUrl")
+	}
+	destinationUrl.Path = path.Join(destinationUrl.Path, newDest)
+
+	contents := fmt.Sprintf(fileTemplate, destinationUrl.String())
+
+	file, err := os.Create(path.Join(createDir, newSrc))
+	if err != nil {
+		log.Fatalf("Could not create %s", newSrc)
+	}
+	file.WriteString(contents)
+	file.Close()
+
 }
