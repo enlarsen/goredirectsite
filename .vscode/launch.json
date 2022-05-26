@@ -5,17 +5,33 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Launch Package",
+            "name": "DevTools HTML",
             "type": "go",
             "request": "launch",
             "mode": "auto",
             "program": "goredirectsite.go",
             "args": [
                 "https://docs.deque.com/devtools-html/4.0.0/en",
+                "welcome-axe-devtools",
                 "/Users/erikla-deque/src/HTML-docs-website/content",
                 "/Users/erikla-deque/src/docs-devtools-html/content/4.0/en",
                 "/Users/erikla-deque/Desktop/test-site"
             ]
+        },
+        {
+            "name": "Linter",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "goredirectsite.go",
+            "args": [
+                "https://docs.deque.com/linter/1.0.0/en",
+                "welcome-axe-devtools",
+                "/Users/erikla-deque/src/HTML-docs-website/content",
+                "/Users/erikla-deque/src/docs-linter/content/1.0.0/en",
+                "/Users/erikla-deque/Desktop/test-site"
+            ]
         }
+
     ]
 }

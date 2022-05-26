@@ -35,6 +35,7 @@ type fileMetadata struct {
 }
 
 var baseUrl string
+var defaultPageID string
 var oldFilesDir string
 var newFilesDir string
 var createDir string
@@ -46,18 +47,20 @@ var fileTemplate = `<meta http-equiv="refresh" content="0; URL='%s'" />`
 
 func main() {
 
-	// base-url old-dir-tree new-dir-tree to-be-created-tree
+	// base-url default-page-id old-dir-tree new-dir-tree to-be-created-tree
 	//
 	flag.Parse()
 
 	baseUrl = flag.Arg(0) // eg: https://docs.deque.com/devtools-html/4.0.0/en
 
-	oldFilesDir = flag.Arg(1)
-	newFilesDir = flag.Arg(2)
-	createDir = flag.Arg(3) // The output directory for the redirect site
+	defaultPageID = flag.Arg(1)
+
+	oldFilesDir = flag.Arg(2)
+	newFilesDir = flag.Arg(3)
+	createDir = flag.Arg(4) // The output directory for the redirect site
 
 	if baseUrl == "" || oldFilesDir == "" || newFilesDir == "" || createDir == "" {
-		log.Fatal("must specify four parameters: one url and three directories: <base-url> <oldFilesDir> <newFilesDir> <createDir>")
+		log.Fatal("must specify five parameters: <base-url> <default-page-id> <oldFilesDir> <newFilesDir> <createDir>")
 	}
 
 	err := checkDir(oldFilesDir)
@@ -103,11 +106,11 @@ func main() {
 	// log.Println("Checking new (source) against old (destination)")
 	// match(newFileMetadata, oldFileMetadata)
 
-	// Now create the main page redirects
-
 	for k, src := range oldFileMetadata {
 		dest, ok := newFileMetadata[k]
 		if ok {
+
+			// Now create the main page redirects
 
 			makeRedirect(src.filepath, dest.id)
 
@@ -122,9 +125,10 @@ func main() {
 		}
 	}
 
-	// Create an index page redirect, destination ID should be a command-line option instead
+	// Create an index page redirect
 
-	makeRedirect("index.html", "welcome-axe-devtools")
+	// makeRedirect("index.html", "welcome-axe-devtools")
+	makeRedirect("index.html", defaultPageID)
 }
 
 func checkDir(directory string) (err error) {
@@ -174,16 +178,26 @@ func parseFile(contentPath string, baseDir string, filemeta map[string]fileMetad
 	reader := text.NewReader(buffer)
 
 	context := parser.NewContext()
+
 	md.Parser().Parse(reader, parser.WithContext(context))
 
 	metaData := meta.Get(context)
-
+	if metaData == nil {
+		log.Fatalf("No metadata on %s\n", contentPath)
+	}
 	id, ok := metaData["id"].(string)
 	if !ok {
 		id = ""
 	}
 
 	permalink, ok := metaData["permalink"].(string)
+
+	// If there is no permalink metadata, give up.
+	// Giving up has big consequences because then there
+	// are no redirects created, but if there is no permalink
+	// they can't be matched to a URL on the new site so we're
+	// stuck anyway without a permalink.
+
 	if !ok {
 		log.Println("Couldn't find permalink metadata on: " + contentPath)
 		return
@@ -194,7 +208,6 @@ func parseFile(contentPath string, baseDir string, filemeta map[string]fileMetad
 	if ok {
 		log.Printf("Permalink value already defined: %s for file: %s, other file: %s\n",
 			permalink, contentPath, filemeta[permalink].filepath)
-		return
 	}
 
 	redirects := make([]string, 0)
@@ -211,12 +224,13 @@ func parseFile(contentPath string, baseDir string, filemeta map[string]fileMetad
 		}
 	}
 
-	filemeta[permalink] = fileMetadata{
-		filepath:  contentPath,
-		id:        id,
-		redirects: redirects,
+	if id != "" {
+		filemeta[permalink] = fileMetadata{
+			filepath:  contentPath,
+			id:        id,
+			redirects: redirects,
+		}
 	}
-
 }
 
 func match(source map[string]fileMetadata, dest map[string]fileMetadata) {
@@ -251,7 +265,7 @@ func makeRedirect(srcFilepath string, destId string) {
 		newSrc = fixSrc(srcFilepath)
 	} else {
 		newSrc = srcFilepath
-		if !strings.HasSuffix(newSrc, "index.html") {
+		if !strings.HasSuffix(newSrc, ".html") {
 			newSrc = filepath.Join(newSrc, "index.html")
 		}
 		log.Printf("**** Got relative path for makeRedirect: %s changed to: %s", srcFilepath, newSrc)
