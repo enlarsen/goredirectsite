@@ -112,12 +112,12 @@ func main() {
 
 			// Now create the main page redirects
 
-			makeRedirect(src.filepath, dest.id)
+			makeRedirect(k, dest.id) // Use k, the permalink, as the src path
 
 			// Now create manual redirects based on the redirect_from metadata
 
 			for _, redir := range src.redirects {
-				log.Printf("Src file: %s, redir: %s\n", fixSrc(src.filepath), redir)
+				log.Printf("Src file: %s, redir: %s\n", fixSrc(k), redir)
 				makeRedirect(redir, dest.id)
 
 			}
@@ -127,7 +127,6 @@ func main() {
 
 	// Create an index page redirect
 
-	// makeRedirect("index.html", "welcome-axe-devtools")
 	makeRedirect("index.html", defaultPageID)
 }
 
@@ -183,7 +182,8 @@ func parseFile(contentPath string, baseDir string, filemeta map[string]fileMetad
 
 	metaData := meta.Get(context)
 	if metaData == nil {
-		log.Fatalf("No metadata on %s\n", contentPath)
+		//		log.Fatalf("No metadata on %s\n", contentPath)
+		return
 	}
 	id, ok := metaData["id"].(string)
 	if !ok {
@@ -246,7 +246,9 @@ func match(source map[string]fileMetadata, dest map[string]fileMetadata) {
 // Modifications to the src path go here
 
 func fixSrc(src string) string {
-	newSrc, err := filepath.Rel(oldFilesDir, src)
+	newSrc := filepath.Join(oldFilesDir, src)
+
+	newSrc, err := filepath.Rel(oldFilesDir, newSrc)
 	if err != nil {
 		log.Fatalf("In fixSrc: %q", err)
 	}
